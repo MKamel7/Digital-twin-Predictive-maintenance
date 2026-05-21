@@ -1,0 +1,17 @@
+# MATLAB automatic backups and histories
+*.asv
+*.mat.all
+*.mex*
+
+# Simulink compile artifacts (Crucial to ignore)
+slprj/
+*.slxc
+*.mexw64
+*.mexmaca64
+*.mexmaci64
+*.mexa64
+
+# Desktop layout and autosave files
+.SimulinkProject/
+_autosave*
+*.log
