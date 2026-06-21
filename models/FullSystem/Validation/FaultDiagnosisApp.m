@@ -35,6 +35,10 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         PlayPauseButton     matlab.ui.control.Button
         StepButton          matlab.ui.control.Button
         StatusLabel         matlab.ui.control.Label
+        ConfusionLabel      matlab.ui.control.Label
+        ConfusionTable      matlab.ui.control.Table
+        AccuracyLabel       matlab.ui.control.Label
+        LastClassifiedLabel matlab.ui.control.Label
     end
 
     properties (Access = private)
@@ -172,6 +176,43 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
 
             app.ProgressLabel.Text = sprintf('File %d of %d', app.CurrentIndex, numel(app.Results));
             app.FileNameLabel.Text = r.fileName;
+
+            app.updateConfusionDisplay();
+        end
+
+        function updateConfusionDisplay(app)
+            % Pure accumulation over already-precomputed predictions
+            % (Results(1:CurrentIndex)) -- no new inference here. Derived
+            % fresh from CurrentIndex every call (not an incremental
+            % running counter), so it resets correctly for free whenever
+            % CurrentIndex wraps back to 1 on replay -- no separate reset
+            % logic to forget.
+            classNames = {'healthy','gear_wear','bearing','imbalance'};
+            n = app.CurrentIndex;
+            confMat = zeros(4,4);
+            nCorrect = 0;
+            for i = 1:n
+                ti = find(strcmp(classNames, app.Results(i).trueCondition));
+                pi = find(strcmp(classNames, app.Results(i).predCondition));
+                confMat(ti,pi) = confMat(ti,pi) + 1;
+                if app.Results(i).isMatch
+                    nCorrect = nCorrect + 1;
+                end
+            end
+
+            app.ConfusionTable.Data = confMat;
+            % "Demo sequence accuracy" labeled explicitly -- this is over
+            % the n<=10 stitched files shown, NOT the model's headline
+            % held-out test accuracy. Always shown as a raw fraction,
+            % never a computed percentage, so "100%" can never appear
+            % even when every file so far is correct.
+            app.AccuracyLabel.Text = sprintf('Demo sequence accuracy: %d/%d correct', nCorrect, n);
+
+            rCur = app.Results(n);
+            app.LastClassifiedLabel.Text = sprintf('Last classified: true=%s, predicted=%s (row %d, col %d)', ...
+                rCur.trueCondition, rCur.predCondition, ...
+                find(strcmp(classNames, rCur.trueCondition)), ...
+                find(strcmp(classNames, rCur.predCondition)));
         end
 
         function timerCallback(app, ~, ~)
@@ -236,48 +277,62 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         end
 
         function createComponents(app)
-            app.UIFigure = uifigure('Name', 'Fault Diagnosis Demo', 'Position', [100 100 760 640]);
+            app.UIFigure = uifigure('Name', 'Fault Diagnosis Demo', 'Position', [100 100 760 860]);
             app.UIFigure.CloseRequestFcn = @(~,~) app.UIFigureCloseRequest();
 
             app.TitleLabel = uilabel(app.UIFigure, ...
                 'Text', 'Automated Fault Diagnosis -- SVM Classifier (held-out test data)', ...
                 'FontSize', 16, 'FontWeight', 'bold', ...
-                'Position', [20 590 720 30]);
+                'Position', [20 810 720 30]);
 
             app.ConditionLabel = uilabel(app.UIFigure, 'Text', 'Predicted condition:', ...
-                'FontSize', 13, 'Position', [20 545 160 25]);
+                'FontSize', 13, 'Position', [20 765 160 25]);
             app.ConditionValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 22, 'FontWeight', 'bold', 'Position', [190 538 220 35]);
+                'FontSize', 22, 'FontWeight', 'bold', 'Position', [190 758 220 35]);
 
             app.MatchLabel = uilabel(app.UIFigure, 'Text', 'Prediction correct?', ...
-                'FontSize', 13, 'Position', [430 545 150 25]);
+                'FontSize', 13, 'Position', [430 765 150 25]);
             app.MatchValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 22, 'FontWeight', 'bold', 'Position', [590 538 60 35]);
+                'FontSize', 22, 'FontWeight', 'bold', 'Position', [590 758 60 35]);
 
             app.ScoreLabel = uilabel(app.UIFigure, 'Text', 'Decision score (SVM margin, not a calibrated probability):', ...
-                'FontSize', 11, 'Position', [20 510 420 22]);
+                'FontSize', 11, 'Position', [20 730 420 22]);
             app.ScoreValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 13, 'FontWeight', 'bold', 'Position', [450 510 100 22]);
+                'FontSize', 13, 'FontWeight', 'bold', 'Position', [450 730 100 22]);
 
             app.SeverityGaugeLabel = uilabel(app.UIFigure, 'Text', 'Ground-truth severity (not predicted -- known label)', ...
-                'FontSize', 11, 'Position', [560 460 180 35], 'WordWrap', 'on');
+                'FontSize', 11, 'Position', [560 680 180 35], 'WordWrap', 'on');
             app.SeverityGauge = uigauge(app.UIFigure, 'linear', ...
-                'Limits', [0 3], 'Position', [580 380 60 80]);
+                'Limits', [0 3], 'Position', [580 600 60 80]);
 
-            app.DeltaTauAxes = uiaxes(app.UIFigure, 'Position', [20 220 540 270]);
+            app.DeltaTauAxes = uiaxes(app.UIFigure, 'Position', [20 440 540 270]);
 
             app.ProgressLabel = uilabel(app.UIFigure, 'Text', 'File 0 of 0', ...
-                'FontSize', 12, 'Position', [20 180 150 22]);
+                'FontSize', 12, 'Position', [20 400 150 22]);
             app.FileNameLabel = uilabel(app.UIFigure, 'Text', '', ...
-                'FontSize', 10, 'FontColor', [0.4 0.4 0.4], 'Position', [180 180 500 22]);
+                'FontSize', 10, 'FontColor', [0.4 0.4 0.4], 'Position', [180 400 500 22]);
 
             app.PlayPauseButton = uibutton(app.UIFigure, 'Text', 'Play', ...
-                'Position', [20 130 100 35], 'ButtonPushedFcn', @(~,~) app.PlayPauseButtonPushed());
+                'Position', [20 350 100 35], 'ButtonPushedFcn', @(~,~) app.PlayPauseButtonPushed());
             app.StepButton = uibutton(app.UIFigure, 'Text', 'Step', ...
-                'Position', [140 130 100 35], 'ButtonPushedFcn', @(~,~) app.StepButtonPushed());
+                'Position', [140 350 100 35], 'ButtonPushedFcn', @(~,~) app.StepButtonPushed());
 
             app.StatusLabel = uilabel(app.UIFigure, 'Text', '', ...
-                'FontSize', 11, 'FontColor', [0.5 0.1 0.1], 'Position', [20 90 700 25]);
+                'FontSize', 11, 'FontColor', [0.5 0.1 0.1], 'Position', [20 310 700 25]);
+
+            % --- Item 2: live confusion matrix + running accuracy ---
+            app.ConfusionLabel = uilabel(app.UIFigure, ...
+                'Text', 'Confusion matrix accumulated over this demo sequence (rows = true, columns = predicted):', ...
+                'FontSize', 11, 'FontWeight', 'bold', 'Position', [20 270 700 22]);
+            app.ConfusionTable = uitable(app.UIFigure, ...
+                'Position', [20 90 400 175], ...
+                'ColumnName', {'healthy','gear_wear','bearing','imbalance'}, ...
+                'RowName', {'healthy','gear_wear','bearing','imbalance'}, ...
+                'Data', zeros(4,4));
+            app.AccuracyLabel = uilabel(app.UIFigure, 'Text', 'Demo sequence accuracy: 0/0 correct', ...
+                'FontSize', 13, 'FontWeight', 'bold', 'Position', [440 220 300 25]);
+            app.LastClassifiedLabel = uilabel(app.UIFigure, 'Text', '', ...
+                'FontSize', 11, 'Position', [440 190 300 25], 'WordWrap', 'on');
         end
     end
 
