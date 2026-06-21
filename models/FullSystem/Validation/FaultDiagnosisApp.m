@@ -41,6 +41,10 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         ConfusionTable      matlab.ui.control.Table
         AccuracyLabel       matlab.ui.control.Label
         LastClassifiedLabel matlab.ui.control.Label
+        ScorePanelLabel     matlab.ui.control.Label
+        ScorePanelAxes      matlab.ui.control.UIAxes
+        Stage1Label         matlab.ui.control.Label
+        Stage1Value         matlab.ui.control.Label
     end
 
     properties (Access = private)
@@ -48,6 +52,7 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         Results        % struct array, fully precomputed before timer starts
         CurrentIndex = 1
         IsPlaying = false
+        ScoreBarHandle % Bar object, created once, updated via set() thereafter
     end
 
     methods (Access = public)
@@ -97,7 +102,15 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 'jointId', {1, 1, 1, 1, 1, 1, 1, 1, 1, 1});
 
             results = struct('fileName',{},'trueCondition',{},'trueSeverity',{}, ...
-                'predCondition',{},'score',{},'isMatch',{},'deltaTauMotor',{},'time',{});
+                'predCondition',{},'score',{},'isMatch',{},'deltaTauMotor',{},'time',{}, ...
+                'stage1Verdict',{},'stage1Correct',{},'stage2Scores3',{},'stage2PredCondition',{});
+
+            % Stage 2's three fault classes, fixed display order (not
+            % combined with "healthy" -- stage1 and stage2 are different
+            % decision functions on different axes, displayed separately
+            % rather than mixed into one illegitimate softmax).
+            classNames3 = ["gear_wear","bearing","imbalance"];
+            stage2Classes = string(M.stage2Model.ClassNames);
 
             for k = 1:numel(seq)
                 cond = seq(k).condition;
@@ -127,13 +140,43 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 xz = (x - mu) ./ sigma;
 
                 [p1, score1] = predict(M.stage1Model, xz);
+                % Always also query stage2, even when stage1 says
+                % "healthy" -- this does not change which class WINS
+                % (still follows the two-stage decision below); it only
+                % gets the fault-type scores for the Stage 2 panel.
+                % Querying an already-trained model's decision function
+                % an extra time for display is not retraining/new data.
+                [pred2, negLoss2] = predict(M.stage2Model, xz);
+
                 if p1 == "faulty"
-                    [pred, score2] = predict(M.stage2Model, xz);
-                    decisionScore = max(score2);
+                    pred = pred2;
+                    decisionScore = max(negLoss2);
                 else
                     pred = categorical("healthy");
                     decisionScore = max(score1);
                 end
+
+                % Two-stage display split -- NOT combined into one
+                % softmax. Stage 1's healthy-vs-faulty margin and Stage
+                % 2's among-faults NegLoss are different decision
+                % functions on different axes; mixing them previously
+                % made "healthy" look misleadingly competitive against
+                % gear_wear even on files stage1 correctly called
+                % faulty. Displaying them separately removes that
+                % artifact rather than tuning around it.
+                stage1Verdict = string(p1);
+                trueIsHealthy = strcmp(cond, 'healthy');
+                stage1Correct = (stage1Verdict == "healthy") == trueIsHealthy;
+
+                % Stage 2: softmax within the 3 fault classes only --
+                % single decision function, legitimate normalization.
+                scores3 = zeros(1,3);
+                for c = 1:3
+                    idx2 = find(stage2Classes == classNames3(c));
+                    scores3(c) = negLoss2(idx2);
+                end
+                ex = exp(scores3 - max(scores3));
+                stage2Scores3 = ex / sum(ex);
 
                 results(k).fileName = fname;
                 results(k).trueCondition = cond;
@@ -143,6 +186,10 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 results(k).isMatch = string(pred) == cond;
                 results(k).deltaTauMotor = motor(:, seq(k).jointId);
                 results(k).time = tTrim;
+                results(k).stage1Verdict = stage1Verdict;
+                results(k).stage1Correct = stage1Correct;
+                results(k).stage2Scores3 = stage2Scores3;
+                results(k).stage2PredCondition = string(pred2);
             end
 
             app.Results = results;
@@ -181,6 +228,66 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
             app.FileNameLabel.Text = r.fileName;
 
             app.updateConfusionDisplay();
+            app.updateScorePanel();
+        end
+
+        function updateScorePanel(app)
+            % Item 4 (v2, two-stage split): pure display update over
+            % already-precomputed Stage1/Stage2 results -- no new
+            % inference. set()-only update of the existing Bar handle.
+            % Stage 1 and Stage 2 are shown separately because they are
+            % different decision functions on different axes; combining
+            % them into one softmax previously made "healthy" look
+            % misleadingly competitive against gear_wear even on files
+            % Stage 1 correctly called faulty.
+            r = app.Results(app.CurrentIndex);
+
+            % --- Stage 1 indicator ---
+            if r.stage1Correct
+                stage1Mark = char(10003); % checkmark
+            else
+                stage1Mark = char(10007); % cross
+            end
+            app.Stage1Value.Text = sprintf('%s %s', upper(r.stage1Verdict), stage1Mark);
+            if r.stage1Correct
+                app.Stage1Value.FontColor = [0.1 0.6 0.1];
+            else
+                app.Stage1Value.FontColor = [0.75 0.1 0.1];
+            end
+
+            % --- Stage 2: 3-bar panel (gear_wear/bearing/imbalance only) ---
+            classNames3 = {'gear_wear','bearing','imbalance'};
+            scores3 = r.stage2Scores3;
+            stage2WinIdx = find(strcmp(classNames3, r.stage2PredCondition));
+            [~, sortOrd] = sort(scores3, 'descend');
+            if sortOrd(1) == stage2WinIdx
+                secondIdx = sortOrd(2);
+            else
+                secondIdx = sortOrd(1);
+            end
+
+            colorDefault = [0.29 0.29 0.32];
+            colorSecond  = [0.42 0.45 0.49];
+            colorWin     = [0.00 0.45 0.74];
+            colorWinMiss = [0.85 0.10 0.10];
+            colorInactive = [0.45 0.45 0.45]; % Stage 1 said healthy -- Stage 2's pick was never the actual output
+
+            cdata = repmat(colorDefault, 3, 1);
+            cdata(secondIdx, :) = colorSecond;
+            if r.stage1Verdict == "faulty"
+                % Stage 2's winner WAS the actual prediction's tiebreaker.
+                if r.isMatch
+                    cdata(stage2WinIdx, :) = colorWin;
+                else
+                    cdata(stage2WinIdx, :) = colorWinMiss;
+                end
+            else
+                % Stage 1 said healthy -- Stage 2 never determined the
+                % output. Show its top pick neutrally, not as a win/miss.
+                cdata(stage2WinIdx, :) = colorInactive;
+            end
+
+            set(app.ScoreBarHandle, 'YData', scores3, 'CData', cdata);
         end
 
         function updateConfusionDisplay(app)
@@ -315,6 +422,28 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 'Limits', [0 3], 'Position', [580 600 60 80]);
 
             app.DeltaTauAxes = uiaxes(app.UIFigure, 'Position', [20 440 540 270]);
+
+            % Item 4 (v2, two-stage split): Stage 1 (healthy vs faulty)
+            % shown as its own indicator -- NOT mixed into a combined
+            % softmax with Stage 2, since the two are different decision
+            % functions on different axes. Stage 2's 3-bar panel
+            % (gear_wear/bearing/imbalance only) is created ONCE here
+            % with placeholder data; updateDisplay reuses this same Bar
+            % handle via set(...,'YData','CData') -- never replot().
+            app.Stage1Label = uilabel(app.UIFigure, 'Text', 'Stage 1 -- healthy vs faulty:', ...
+                'FontSize', 10, 'Position', [560 612 190 18]);
+            app.Stage1Value = uilabel(app.UIFigure, 'Text', '-', ...
+                'FontSize', 13, 'FontWeight', 'bold', 'Position', [560 592 190 20]);
+
+            app.ScorePanelLabel = uilabel(app.UIFigure, ...
+                'Text', 'Stage 2 -- fault type only, softmax within these 3 (not a calibrated probability; only meaningful when Stage 1 = faulty)', ...
+                'FontSize', 8, 'Position', [560 555 190 35], 'WordWrap', 'on');
+            app.ScorePanelAxes = uiaxes(app.UIFigure, 'Position', [560 440 190 110]);
+            app.ScoreBarHandle = barh(app.ScorePanelAxes, 1:3, zeros(1,3), 'FaceColor', 'flat');
+            app.ScorePanelAxes.YTick = 1:3;
+            app.ScorePanelAxes.YTickLabel = {'gear\_wear','bearing','imbalance'};
+            app.ScorePanelAxes.XLim = [0 1];
+            xlabel(app.ScorePanelAxes, 'relative confidence');
 
             app.ProgressLabel = uilabel(app.UIFigure, 'Text', 'File 0 of 0', ...
                 'FontSize', 12, 'Position', [20 400 150 22]);
