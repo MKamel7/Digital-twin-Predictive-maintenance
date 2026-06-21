@@ -29,6 +29,8 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         MatchValue          matlab.ui.control.Label
         SeverityGauge       matlab.ui.control.LinearGauge
         SeverityGaugeLabel  matlab.ui.control.Label
+        TrueConditionLabel  matlab.ui.control.Label
+        TrueConditionValue  matlab.ui.control.Label
         DeltaTauAxes        matlab.ui.control.UIAxes
         ProgressLabel       matlab.ui.control.Label
         FileNameLabel       matlab.ui.control.Label
@@ -167,6 +169,7 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
             end
 
             app.SeverityGauge.Value = r.trueSeverity;
+            app.TrueConditionValue.Text = sprintf('%s (severity %d)', r.trueCondition, r.trueSeverity);
 
             plot(app.DeltaTauAxes, r.time, r.deltaTauMotor, 'LineWidth', 1.2);
             title(app.DeltaTauAxes, sprintf('delta\\_tau\\_motor (J%d) -- true: %s', 1, r.trueCondition));
@@ -294,6 +297,12 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 'FontSize', 13, 'Position', [430 765 150 25]);
             app.MatchValue = uilabel(app.UIFigure, 'Text', '-', ...
                 'FontSize', 22, 'FontWeight', 'bold', 'Position', [590 758 60 35]);
+
+            app.TrueConditionLabel = uilabel(app.UIFigure, 'Text', 'True condition (known label):', ...
+                'FontSize', 13, 'Position', [20 700 220 25]);
+            app.TrueConditionValue = uilabel(app.UIFigure, 'Text', '-', ...
+                'FontSize', 16, 'FontWeight', 'bold', 'FontColor', [0.2 0.2 0.2], ...
+                'Position', [250 695 250 30]);
 
             app.ScoreLabel = uilabel(app.UIFigure, 'Text', 'Decision score (SVM margin, not a calibrated probability):', ...
                 'FontSize', 11, 'Position', [20 730 420 22]);
