@@ -16,8 +16,8 @@ fprintf('\nAfter playback: %s\n', app.ProgressLabel.Text);
 fprintf('File: %s\n', app.FileNameLabel.Text);
 fprintf('PlayPauseButton (expect "Play", auto-stopped at end): %s\n', app.PlayPauseButton.Text);
 fprintf('StatusLabel: %s\n', app.StatusLabel.Text);
-fprintf('Final ConditionValue="%s" MatchValue="%s" (charcode=%s) SeverityGauge=%g\n', ...
-    app.ConditionValue.Text, app.MatchValue.Text, mat2str(double(app.MatchValue.Text)), app.SeverityGauge.Value);
+fprintf('Final ConditionValue="%s" TrueConditionValue="%s" MatchValue="%s" (charcode=%s) SeverityGauge=%g\n', ...
+    app.ConditionValue.Text, app.TrueConditionValue.Text, app.MatchValue.Text, mat2str(double(app.MatchValue.Text)), app.SeverityGauge.Value);
 fprintf('AccuracyLabel: %s\n', app.AccuracyLabel.Text);
 fprintf('LastClassifiedLabel: %s\n', app.LastClassifiedLabel.Text);
 fprintf('Confusion matrix (rows=true: healthy,gear_wear,bearing,imbalance; cols=predicted same order):\n');
@@ -33,8 +33,8 @@ fprintf('AccuracyLabel after wrap (expect 1/1 correct -- healthy): %s\n', app.Ac
 
 for k = 1:9
     app.StepButtonPushed();
-    fprintf('After Step: %s | %s | pred=%s match="%s" (charcode=%s) severityGauge=%g\n', ...
-        app.ProgressLabel.Text, app.FileNameLabel.Text, app.ConditionValue.Text, ...
+    fprintf('After Step: %s | %s | true=%s pred=%s match="%s" (charcode=%s) severityGauge=%g\n', ...
+        app.ProgressLabel.Text, app.FileNameLabel.Text, app.TrueConditionValue.Text, app.ConditionValue.Text, ...
         app.MatchValue.Text, mat2str(double(app.MatchValue.Text)), app.SeverityGauge.Value);
     if k == 1
         fprintf('  -> at the known sev1 miss: AccuracyLabel=%s (expect 1/2, confirms the miss is counted)\n', app.AccuracyLabel.Text);
