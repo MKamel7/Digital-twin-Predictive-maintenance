@@ -1,0 +1,27 @@
+# MATLAB automatic backups and histories
+*.asv
+*.mat.all
+*.mex*
+
+# Simulink compile artifacts (Crucial to ignore)
+slprj/
+*.slxc
+*.mexw64
+*.mexmaca64
+*.mexmaci64
+*.mexa64
+
+# Desktop layout and autosave files
+.SimulinkProject/
+_autosave*
+*.log
+
+# Bulk simulation datasets are too large for git; keep manifests/docs and one
+# sample run per category, ignore the rest. See data/*/README* for full set.
+data/healthy/run_*.mat
+models/FullSystem/data/healthy/run_*.mat
+models/FullSystem/data/faults/**/run_*.mat
+!data/healthy/run_healthy_H01_nominal_j0_s0_20260604_220158.mat
+!models/FullSystem/data/healthy/run_healthy_001.mat
+!models/FullSystem/data/faults/bearing/run_bearing_j3_sev0.50.mat
+!models/FullSystem/data/faults/gear_wear/run_gear_wear_j3_sev0.50.mat
