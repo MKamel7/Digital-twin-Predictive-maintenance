@@ -21,6 +21,13 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
     properties (Access = public)
         UIFigure            matlab.ui.Figure
         TitleLabel          matlab.ui.control.Label
+        PredictionPanel     matlab.ui.container.Panel
+        GroundTruthPanel    matlab.ui.container.Panel
+        SignalPanel         matlab.ui.container.Panel
+        StagesPanel         matlab.ui.container.Panel
+        ControlPanel        matlab.ui.container.Panel
+        ConfusionPanel      matlab.ui.container.Panel
+        MetricsPanel        matlab.ui.container.Panel
         ConditionLabel      matlab.ui.control.Label
         ConditionValue      matlab.ui.control.Label
         ScoreLabel          matlab.ui.control.Label
@@ -41,10 +48,12 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         ConfusionTable      matlab.ui.control.Table
         AccuracyLabel       matlab.ui.control.Label
         LastClassifiedLabel matlab.ui.control.Label
+        MetricsNoteLabel    matlab.ui.control.Label
         ScorePanelLabel     matlab.ui.control.Label
         ScorePanelAxes      matlab.ui.control.UIAxes
         Stage1Label         matlab.ui.control.Label
         Stage1Value         matlab.ui.control.Label
+        BarLegendLabel      matlab.ui.control.Label
     end
 
     properties (Access = private)
@@ -198,31 +207,45 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         function updateDisplay(app)
             r = app.Results(app.CurrentIndex);
 
+            % Dark-mode status colors -- brightened so green/red read
+            % clearly against the dark panel background.
+            cGood = [0.35 0.85 0.45];
+            cBad  = [0.98 0.45 0.45];
+            cInk  = [0.93 0.95 0.98];
+
             app.ConditionValue.Text = r.predCondition;
             if r.isMatch
-                app.ConditionValue.FontColor = [0.1 0.6 0.1];
+                app.ConditionValue.FontColor = cGood;
             else
-                app.ConditionValue.FontColor = [0.75 0.1 0.1];
+                app.ConditionValue.FontColor = cBad;
             end
 
             app.ScoreValue.Text = sprintf('%.3f', r.score);
 
             if r.isMatch
                 app.MatchValue.Text = char(10003); % checkmark
-                app.MatchValue.FontColor = [0.1 0.6 0.1];
+                app.MatchValue.FontColor = cGood;
             else
                 app.MatchValue.Text = char(10007); % cross
-                app.MatchValue.FontColor = [0.75 0.1 0.1];
+                app.MatchValue.FontColor = cBad;
             end
 
             app.SeverityGauge.Value = r.trueSeverity;
             app.TrueConditionValue.Text = sprintf('%s (severity %d)', r.trueCondition, r.trueSeverity);
 
-            plot(app.DeltaTauAxes, r.time, r.deltaTauMotor, 'LineWidth', 1.2);
-            title(app.DeltaTauAxes, sprintf('delta\\_tau\\_motor (J%d) -- true: %s', 1, r.trueCondition));
-            xlabel(app.DeltaTauAxes, 'Time (s)');
-            ylabel(app.DeltaTauAxes, 'Nm');
+            plot(app.DeltaTauAxes, r.time, r.deltaTauMotor, 'LineWidth', 1.4, 'Color', [0.30 0.72 1.00]);
+            title(app.DeltaTauAxes, sprintf('delta\\_tau\\_motor (J%d) -- true: %s', 1, r.trueCondition), 'Color', cInk);
+            xlabel(app.DeltaTauAxes, 'Time (s)', 'Color', cInk);
+            ylabel(app.DeltaTauAxes, 'Nm', 'Color', cInk);
             grid(app.DeltaTauAxes, 'on');
+            app.DeltaTauAxes.GridAlpha = 0.28;
+            % Tight on time, but pad the y-range so the signal's top/bottom
+            % peaks are not flush against the axis frame (which read as
+            % "clipped"). Pad by 12% of the signal span.
+            xlim(app.DeltaTauAxes, [min(r.time) max(r.time)]);
+            ylo = min(r.deltaTauMotor); yhi = max(r.deltaTauMotor);
+            yPad = 0.12 * max(yhi - ylo, eps);
+            ylim(app.DeltaTauAxes, [ylo - yPad, yhi + yPad]);
 
             app.ProgressLabel.Text = sprintf('File %d of %d', app.CurrentIndex, numel(app.Results));
             app.FileNameLabel.Text = r.fileName;
@@ -250,9 +273,9 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
             end
             app.Stage1Value.Text = sprintf('%s %s', upper(r.stage1Verdict), stage1Mark);
             if r.stage1Correct
-                app.Stage1Value.FontColor = [0.1 0.6 0.1];
+                app.Stage1Value.FontColor = [0.35 0.85 0.45];
             else
-                app.Stage1Value.FontColor = [0.75 0.1 0.1];
+                app.Stage1Value.FontColor = [0.98 0.45 0.45];
             end
 
             % --- Stage 2: 3-bar panel (gear_wear/bearing/imbalance only) ---
@@ -266,11 +289,15 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
                 secondIdx = sortOrd(1);
             end
 
-            colorDefault = [0.29 0.29 0.32];
-            colorSecond  = [0.42 0.45 0.49];
-            colorWin     = [0.00 0.45 0.74];
-            colorWinMiss = [0.85 0.10 0.10];
-            colorInactive = [0.45 0.45 0.45]; % Stage 1 said healthy -- Stage 2's pick was never the actual output
+            % Dark-mode bar palette -- chosen for contrast against the
+            % dark axes. Legend in the Stages panel states the mapping:
+            % blue = chosen fault (correct), red = chosen (wrong),
+            % light grey = runner-up.
+            colorDefault = [0.40 0.42 0.48];
+            colorSecond  = [0.66 0.70 0.78];
+            colorWin     = [0.30 0.66 0.98];
+            colorWinMiss = [0.98 0.42 0.42];
+            colorInactive = [0.52 0.54 0.60]; % Stage 1 said healthy -- Stage 2's pick was never the actual output
 
             cdata = repmat(colorDefault, 3, 1);
             cdata(secondIdx, :) = colorSecond;
@@ -387,42 +414,98 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
         end
 
         function createComponents(app)
-            app.UIFigure = uifigure('Name', 'Fault Diagnosis Demo', 'Position', [100 100 760 860]);
+            % Layout/visual pass only (now dark-themed) -- every
+            % component property name, the precomputed-results contract,
+            % the two-stage display split, and the verify-script access
+            % points are preserved. Components are grouped into titled
+            % panels; positions are relative to each panel. No prediction
+            % logic or integrity semantics changed.
+            figBG       = [0.11 0.12 0.15];   % near-black slate background
+            panelBG     = [0.17 0.18 0.22];   % card background
+            panelBorder = [0.30 0.32 0.40];
+            accent      = [0.34 0.70 1.00];   % bright blue for dark bg
+            txtPri      = [0.93 0.95 0.98];   % primary text
+            txtSec      = [0.74 0.78 0.85];   % secondary text -- still high contrast
+            axBG        = [0.09 0.10 0.13];   % plot area background
+            axLine      = [0.78 0.81 0.87];   % axis ticks/labels
+
+            % Built at full design size with Visible='off' so the whole
+            % layout is assembled (and the first frame drawn) before the
+            % window is shown -- prevents the "compress then expand"
+            % flicker of laying out on an already-visible figure. The
+            % constructor then explicitly scales every component to fit
+            % the actual screen (fitToScreen) and flips Visible='on'.
+            % AutoResizeChildren/Resize are 'off' so MATLAB does not
+            % fight our manual scaling; without this the top panels
+            % (incl. the severity bar) were being clipped off a window
+            % that was taller than the screen.
+            % Compact landscape design (940 x 648) that fits within a
+            % typical 720p / display-scaled work area NATIVELY, so
+            % fitToScreen's scale factor is ~1.0 and nothing (notably the
+            % uitable) has to shrink into scrollbars.
+            app.UIFigure = uifigure('Name', 'Fault Diagnosis Demo', ...
+                'Position', [80 40 940 648], 'Color', figBG, 'Visible', 'off', ...
+                'AutoResizeChildren', 'off', 'Resize', 'off');
             app.UIFigure.CloseRequestFcn = @(~,~) app.UIFigureCloseRequest();
 
             app.TitleLabel = uilabel(app.UIFigure, ...
-                'Text', 'Automated Fault Diagnosis -- SVM Classifier (held-out test data)', ...
-                'FontSize', 16, 'FontWeight', 'bold', ...
-                'Position', [20 810 720 30]);
+                'Text', 'Automated Fault Diagnosis  --  SVM Classifier (held-out test data)', ...
+                'FontSize', 16, 'FontWeight', 'bold', 'FontColor', txtPri, ...
+                'Position', [20 592 900 24]);
 
-            app.ConditionLabel = uilabel(app.UIFigure, 'Text', 'Predicted condition:', ...
-                'FontSize', 13, 'Position', [20 765 160 25]);
-            app.ConditionValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 22, 'FontWeight', 'bold', 'Position', [190 758 220 35]);
+            panelArgs = {'BackgroundColor', panelBG, 'FontWeight', 'bold', ...
+                         'FontSize', 11, 'ForegroundColor', accent, ...
+                         'BorderColor', panelBorder};
 
-            app.MatchLabel = uilabel(app.UIFigure, 'Text', 'Prediction correct?', ...
-                'FontSize', 13, 'Position', [430 765 150 25]);
-            app.MatchValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 22, 'FontWeight', 'bold', 'Position', [590 758 60 35]);
+            % ===================== PREDICTION (model output) ===========
+            app.PredictionPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'PREDICTION  (model output)', 'Position', [20 480 448 104]);
 
-            app.TrueConditionLabel = uilabel(app.UIFigure, 'Text', 'True condition (known label):', ...
-                'FontSize', 13, 'Position', [20 700 220 25]);
-            app.TrueConditionValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 16, 'FontWeight', 'bold', 'FontColor', [0.2 0.2 0.2], ...
-                'Position', [250 695 250 30]);
+            app.ConditionLabel = uilabel(app.PredictionPanel, 'Text', 'Predicted condition', ...
+                'FontSize', 11, 'FontColor', txtSec, 'Position', [14 58 170 16]);
+            app.ConditionValue = uilabel(app.PredictionPanel, 'Text', '-', ...
+                'FontSize', 22, 'FontWeight', 'bold', 'FontColor', txtPri, 'Position', [14 24 260 32]);
 
-            app.ScoreLabel = uilabel(app.UIFigure, 'Text', 'Decision score (SVM margin, not a calibrated probability):', ...
-                'FontSize', 11, 'Position', [20 730 420 22]);
-            app.ScoreValue = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 13, 'FontWeight', 'bold', 'Position', [450 730 100 22]);
+            app.MatchLabel = uilabel(app.PredictionPanel, 'Text', 'Prediction correct?', ...
+                'FontSize', 10, 'FontColor', txtSec, 'Position', [288 60 150 16]);
+            app.MatchValue = uilabel(app.PredictionPanel, 'Text', '-', ...
+                'FontSize', 24, 'FontWeight', 'bold', 'HorizontalAlignment', 'center', ...
+                'FontColor', txtPri, 'Position', [330 22 90 34]);
 
-            app.SeverityGaugeLabel = uilabel(app.UIFigure, 'Text', 'Ground-truth severity (not predicted -- known label)', ...
-                'FontSize', 11, 'Position', [560 680 180 35], 'WordWrap', 'on');
-            app.SeverityGauge = uigauge(app.UIFigure, 'linear', ...
-                'Limits', [0 3], 'Position', [580 600 60 80]);
+            app.ScoreLabel = uilabel(app.PredictionPanel, ...
+                'Text', 'Decision score (SVM margin -- not a calibrated probability):', ...
+                'FontSize', 8.5, 'FontColor', txtSec, 'Position', [14 5 300 16]);
+            app.ScoreValue = uilabel(app.PredictionPanel, 'Text', '-', ...
+                'FontSize', 11, 'FontWeight', 'bold', 'FontColor', txtPri, 'Position', [318 5 120 16]);
 
-            app.DeltaTauAxes = uiaxes(app.UIFigure, 'Position', [20 440 540 270]);
+            % ===================== GROUND TRUTH (known label) ==========
+            app.GroundTruthPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'GROUND TRUTH  (known label, not predicted)', 'Position', [478 480 442 104]);
 
+            app.TrueConditionLabel = uilabel(app.GroundTruthPanel, 'Text', 'Condition', ...
+                'FontSize', 11, 'FontColor', txtSec, 'Position', [14 62 90 16]);
+            app.TrueConditionValue = uilabel(app.GroundTruthPanel, 'Text', '-', ...
+                'FontSize', 15, 'FontWeight', 'bold', 'FontColor', txtPri, ...
+                'Position', [104 60 330 20]);
+
+            app.SeverityGaugeLabel = uilabel(app.GroundTruthPanel, ...
+                'Text', 'Ground-truth severity (0 = healthy ... 3 = severe):', ...
+                'FontSize', 9, 'FontColor', txtSec, 'Position', [14 38 414 14]);
+            app.SeverityGauge = uigauge(app.GroundTruthPanel, 'linear', ...
+                'Limits', [0 3], 'Position', [14 6 414 30], ...
+                'ScaleColors', {[0.25 0.75 0.35], [0.96 0.82 0.25], [0.97 0.58 0.18], [0.95 0.30 0.30]}, ...
+                'ScaleColorLimits', [0 0.75; 0.75 1.5; 1.5 2.25; 2.25 3]);
+
+            % ===================== SIGNAL ==============================
+            app.SignalPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'Residual torque signal  (delta\_tau\_motor)', 'Position', [20 250 588 222]);
+            % Axes sits lower in the panel with headroom below the panel
+            % title; ylim padding (in updateDisplay) keeps the signal's
+            % top peak off the frame.
+            app.DeltaTauAxes = uiaxes(app.SignalPanel, 'Position', [16 12 556 176]);
+            app.styleAxesDark(app.DeltaTauAxes, axBG, axLine);
+
+            % ===================== CLASSIFIER STAGES ===================
             % Item 4 (v2, two-stage split): Stage 1 (healthy vs faulty)
             % shown as its own indicator -- NOT mixed into a combined
             % softmax with Stage 2, since the two are different decision
@@ -430,47 +513,89 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
             % (gear_wear/bearing/imbalance only) is created ONCE here
             % with placeholder data; updateDisplay reuses this same Bar
             % handle via set(...,'YData','CData') -- never replot().
-            app.Stage1Label = uilabel(app.UIFigure, 'Text', 'Stage 1 -- healthy vs faulty:', ...
-                'FontSize', 10, 'Position', [560 612 190 18]);
-            app.Stage1Value = uilabel(app.UIFigure, 'Text', '-', ...
-                'FontSize', 13, 'FontWeight', 'bold', 'Position', [560 592 190 20]);
+            app.StagesPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'Classifier stages  (shown separately)', 'Position', [618 250 302 222]);
 
-            app.ScorePanelLabel = uilabel(app.UIFigure, ...
-                'Text', 'Stage 2 -- fault type only, softmax within these 3 (not a calibrated probability; only meaningful when Stage 1 = faulty)', ...
-                'FontSize', 8, 'Position', [560 555 190 35], 'WordWrap', 'on');
-            app.ScorePanelAxes = uiaxes(app.UIFigure, 'Position', [560 440 190 110]);
+            app.Stage1Label = uilabel(app.StagesPanel, 'Text', 'Stage 1 -- healthy vs faulty', ...
+                'FontSize', 10, 'FontColor', txtSec, 'Position', [14 182 275 14]);
+            app.Stage1Value = uilabel(app.StagesPanel, 'Text', '-', ...
+                'FontSize', 15, 'FontWeight', 'bold', 'FontColor', txtPri, 'Position', [14 158 275 22]);
+
+            app.ScorePanelLabel = uilabel(app.StagesPanel, ...
+                'Text', ['Stage 2 -- fault type only. Softmax within these 3 (relative confidence, ', ...
+                         'not a calibrated probability; meaningful only when Stage 1 = faulty).'], ...
+                'FontSize', 8.5, 'FontColor', txtSec, 'Position', [14 116 280 40], 'WordWrap', 'on');
+            app.ScorePanelAxes = uiaxes(app.StagesPanel, 'Position', [10 26 285 88]);
             app.ScoreBarHandle = barh(app.ScorePanelAxes, 1:3, zeros(1,3), 'FaceColor', 'flat');
             app.ScorePanelAxes.YTick = 1:3;
             app.ScorePanelAxes.YTickLabel = {'gear\_wear','bearing','imbalance'};
             app.ScorePanelAxes.XLim = [0 1];
-            xlabel(app.ScorePanelAxes, 'relative confidence');
+            app.ScorePanelAxes.FontSize = 8;
+            app.styleAxesDark(app.ScorePanelAxes, axBG, axLine);
+            xlabel(app.ScorePanelAxes, 'relative confidence', 'Color', axLine);
 
-            app.ProgressLabel = uilabel(app.UIFigure, 'Text', 'File 0 of 0', ...
-                'FontSize', 12, 'Position', [20 400 150 22]);
-            app.FileNameLabel = uilabel(app.UIFigure, 'Text', '', ...
-                'FontSize', 10, 'FontColor', [0.4 0.4 0.4], 'Position', [180 400 500 22]);
+            app.BarLegendLabel = uilabel(app.StagesPanel, ...
+                'Text', 'Bar color:  blue = chosen fault (correct)   red = chosen (wrong)   grey = runner-up', ...
+                'FontSize', 7.5, 'FontColor', txtSec, 'Position', [14 2 280 26], 'WordWrap', 'on');
 
-            app.PlayPauseButton = uibutton(app.UIFigure, 'Text', 'Play', ...
-                'Position', [20 350 100 35], 'ButtonPushedFcn', @(~,~) app.PlayPauseButtonPushed());
-            app.StepButton = uibutton(app.UIFigure, 'Text', 'Step', ...
-                'Position', [140 350 100 35], 'ButtonPushedFcn', @(~,~) app.StepButtonPushed());
+            % ===================== PLAYBACK CONTROLS ===================
+            app.ControlPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'Playback', 'Position', [20 188 900 56]);
 
-            app.StatusLabel = uilabel(app.UIFigure, 'Text', '', ...
-                'FontSize', 11, 'FontColor', [0.5 0.1 0.1], 'Position', [20 310 700 25]);
+            btnBG = [0.24 0.40 0.62];
+            app.PlayPauseButton = uibutton(app.ControlPanel, 'Text', 'Play', ...
+                'FontSize', 12, 'FontWeight', 'bold', 'FontColor', txtPri, 'BackgroundColor', btnBG, ...
+                'Position', [14 6 92 26], 'ButtonPushedFcn', @(~,~) app.PlayPauseButtonPushed());
+            app.StepButton = uibutton(app.ControlPanel, 'Text', 'Step', ...
+                'FontSize', 12, 'FontColor', txtPri, 'BackgroundColor', [0.28 0.30 0.37], ...
+                'Position', [114 6 92 26], 'ButtonPushedFcn', @(~,~) app.StepButtonPushed());
+
+            app.ProgressLabel = uilabel(app.ControlPanel, 'Text', 'File 0 of 0', ...
+                'FontSize', 11, 'FontWeight', 'bold', 'FontColor', txtPri, 'Position', [222 19 170 16]);
+            app.FileNameLabel = uilabel(app.ControlPanel, 'Text', '', ...
+                'FontSize', 9, 'FontColor', txtSec, 'Position', [222 4 660 14]);
+            app.StatusLabel = uilabel(app.ControlPanel, 'Text', '', ...
+                'FontSize', 10, 'FontColor', [0.98 0.62 0.55], 'Position', [410 19 470 16]);
 
             % --- Item 2: live confusion matrix + running accuracy ---
-            app.ConfusionLabel = uilabel(app.UIFigure, ...
-                'Text', 'Confusion matrix accumulated over this demo sequence (rows = true, columns = predicted):', ...
-                'FontSize', 11, 'FontWeight', 'bold', 'Position', [20 270 700 22]);
-            app.ConfusionTable = uitable(app.UIFigure, ...
-                'Position', [20 90 400 175], ...
+            app.ConfusionPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'Confusion matrix -- this demo sequence (rows = true, columns = predicted)', ...
+                'Position', [20 14 568 168]);
+            app.ConfusionLabel = uilabel(app.ConfusionPanel, ...
+                'Text', 'Counts accumulate as the sequence plays; resets to zero on replay.', ...
+                'FontSize', 9, 'FontColor', txtSec, 'Position', [12 126 544 14]);
+            app.ConfusionTable = uitable(app.ConfusionPanel, ...
+                'Position', [12 8 458 116], ...
                 'ColumnName', {'healthy','gear_wear','bearing','imbalance'}, ...
                 'RowName', {'healthy','gear_wear','bearing','imbalance'}, ...
+                'ColumnWidth', {94, 94, 94, 94}, ...
+                'ColumnFormat', {'numeric','numeric','numeric','numeric'}, ...
+                'BackgroundColor', [0.15 0.16 0.20; 0.19 0.20 0.25], ...
+                'ForegroundColor', txtPri, 'FontSize', 10, ...
                 'Data', zeros(4,4));
-            app.AccuracyLabel = uilabel(app.UIFigure, 'Text', 'Demo sequence accuracy: 0/0 correct', ...
-                'FontSize', 13, 'FontWeight', 'bold', 'Position', [440 220 300 25]);
-            app.LastClassifiedLabel = uilabel(app.UIFigure, 'Text', '', ...
-                'FontSize', 11, 'Position', [440 190 300 25], 'WordWrap', 'on');
+
+            app.MetricsPanel = uipanel(app.UIFigure, panelArgs{:}, ...
+                'Title', 'Demo metrics', 'Position', [598 14 322 168]);
+            app.AccuracyLabel = uilabel(app.MetricsPanel, 'Text', 'Demo sequence accuracy: 0/0 correct', ...
+                'FontSize', 12, 'FontWeight', 'bold', 'FontColor', txtPri, ...
+                'Position', [14 118 294 22]);
+            app.LastClassifiedLabel = uilabel(app.MetricsPanel, 'Text', '', ...
+                'FontSize', 10, 'FontColor', [0.86 0.89 0.94], 'Position', [14 58 294 56], 'WordWrap', 'on');
+            app.MetricsNoteLabel = uilabel(app.MetricsPanel, ...
+                'Text', ['Note: this accuracy is over the <=10 files shown here, not the model''s ', ...
+                         'headline held-out test accuracy. Shown as a raw fraction by design.'], ...
+                'FontSize', 8.5, 'FontColor', txtSec, 'Position', [14 6 294 48], 'WordWrap', 'on');
+        end
+
+        function styleAxesDark(~, ax, axBG, axLine)
+            % Apply a consistent dark theme to a uiaxes: dark plot area,
+            % light ticks/grid. Persists across plot()/barh() updates
+            % (which replace child graphics objects, not axes appearance).
+            ax.Color = axBG;
+            ax.XColor = axLine;
+            ax.YColor = axLine;
+            ax.GridColor = [0.60 0.63 0.70];
+            ax.Box = 'on';
         end
     end
 
@@ -485,8 +610,75 @@ classdef FaultDiagnosisApp < matlab.apps.AppBase
             app.CurrentIndex = 1;
             updateDisplay(app);
 
+            % Fit the window to the available screen BEFORE showing it,
+            % so no panel is clipped on smaller / display-scaled screens
+            % (this is what was hiding the GROUND TRUTH / severity panel
+            % at the top). AutoResizeChildren scales every panel to the
+            % fitted size, so the full layout stays visible and the
+            % window is revealed in one step (no flicker).
+            app.fitToScreen();
+            drawnow;
+            app.UIFigure.Visible = 'on';
+
             if nargout == 0
                 clear app
+            end
+        end
+
+        function fitToScreen(app)
+            % Uniformly scale the whole UI (positions AND font sizes) by
+            % a single factor so it fits the available screen, then size
+            % and centre the window to match. A uniform factor keeps the
+            % design proportions intact -- the layout just gets smaller
+            % on smaller / display-scaled screens, and stays full size
+            % when there is room. Done manually because uifigure
+            % AutoResizeChildren does not rescale absolutely-positioned
+            % children on a programmatic resize.
+            designW = 940; designH = 648;
+            ss = get(groot, 'ScreenSize');   % [x y width height]
+            s = min([1, (ss(3) - 40) / designW, (ss(4) - 80) / designH]);
+            if s < 1
+                app.scaleContainer(app.UIFigure, s);
+            end
+            figW = round(designW * s);
+            figH = round(designH * s);
+            x = max(10, round((ss(3) - figW) / 2));
+            y = max(30, ss(4) - figH - 50);  % near top, leaving room for the title bar
+            app.UIFigure.Position = [x y figW figH];
+        end
+
+        function scaleContainer(app, parent, s)
+            % Recursively scale Position and FontSize of every descendant
+            % by s. Panel children are positioned relative to the panel,
+            % so scaling the panel size and its children by the same s
+            % preserves the nested layout exactly.
+            kids = allchild(parent);
+            for i = 1:numel(kids)
+                c = kids(i);
+                if isprop(c, 'Position') && isnumeric(c.Position) && numel(c.Position) == 4
+                    c.Position = c.Position * s;
+                end
+                if isprop(c, 'FontSize')
+                    try
+                        c.FontSize = max(6, c.FontSize * s);
+                    catch
+                    end
+                end
+                % Table column widths are fixed pixels -- scale them too,
+                % otherwise the table grows scrollbars when the widget
+                % shrinks but the columns do not.
+                if isa(c, 'matlab.ui.control.Table') && iscell(c.ColumnWidth)
+                    cw = c.ColumnWidth;
+                    for j = 1:numel(cw)
+                        if isnumeric(cw{j})
+                            cw{j} = cw{j} * s;
+                        end
+                    end
+                    c.ColumnWidth = cw;
+                end
+                if isa(c, 'matlab.ui.container.Panel')
+                    app.scaleContainer(c, s);
+                end
             end
         end
 
