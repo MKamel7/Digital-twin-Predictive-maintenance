@@ -252,6 +252,21 @@ out = sim('Robot_Phase1_PASS', 'SrcWorkspace', 'current');
 **Known rough edge:** `build_feature_matrix.m` opens with a hardcoded absolute `cd` to the machine
 it was written on. Delete that line, or start MATLAB in `models/FullSystem`.
 
+## Roadmap
+
+Housekeeping first, because these are what stop anyone else running it:
+
+- **Fix the hardcoded absolute path.** `models/FullSystem/step13_create_train_val_test_splits.m` sets `projectRoot` to a literal `E:\Digital twin Predictive maintenance\...`. One line, and it is the first thing that fails on any other machine.
+- **One copy of each script.** `GDOFrobot_DataFile.m` exists in six places, `quintic_traj.m` in four and `pickplace_trajectory.m` in three, all byte-identical. A `models/common/` on the path removes all of it. Note `pickplace_trajectory_edited.m` is a genuinely different file and must not be absorbed.
+- **Move the run data out of git.** There is no git-lfs here at all: the `.mat` runs are raw committed blobs, the largest 7.68 MB. LFS or a Release, either way a clone stops carrying the dataset.
+- **Give it CI and a test.** MATLAB R2026a runs headless and `matlab-actions/run-tests` works on hosted runners. One test that builds the model and asserts the residual on a known fault puts this in the same class as the Python repos.
+
+Then the work that is actually interesting:
+
+- **Adaptive twin calibration.** Estimate the uncertain physical parameters (inertia, friction, payload, damping) from healthy runs by minimising residual torque, then compare a fixed twin against a calibrated one at plus or minus 5%, 10% and 20% mismatch. **This attacks the number in the sensitivity table above**, where 10% inertial mismatch already drops full diagnosis to 59.4%. Residual methods live or die on exactly this, and it is a better result than a higher classifier score.
+- **Anomaly detection and severity, not only classification.** Domain randomisation, uncertainty bounds on residuals, detection of faults never seen in training, and RUL or severity regression. Unseen-fault detection is the one that matters industrially, because the catalogue is never complete.
+- **Bring the classifier stage in, or keep the separation as clearly as it is now.** The reported results are honestly labelled as not reproducible from this checkout. That is the right call while the pipeline lives elsewhere, and the alternative is to move it here.
+
 ## Repository layout
 
 ```
