@@ -1,5 +1,7 @@
 # Digital Twin Predictive Maintenance
 
+[![CI](https://github.com/MKamel7/Digital-twin-Predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/MKamel7/Digital-twin-Predictive-maintenance/actions/workflows/ci.yml)
+
 A Simscape Multibody digital twin of a 3-DOF robot arm, used as a fault factory: it generates
 labelled healthy and faulty runs that would be expensive and unsafe to seed on real hardware, and a
 classifier is trained on the residual torque between the physical arm and a healthy virtual twin.
@@ -201,6 +203,47 @@ dies when the twin stops matching the plant. Sweeping inertial-parameter mismatc
 At ±10% mismatch the pipeline is doing little better than guessing between four classes. This is
 the expected failure mode of a residual-based method: the residual is defined by the model, so
 model error and fault signal arrive through the same channel and cannot be told apart.
+
+## Tests
+
+```sh
+matlab -batch "run('scripts/run_public_ci_checks.m')"
+```
+
+25 test points over the two pieces of pure computation in this repository: the
+quintic trajectory generator and the 42-feature extractor. They need neither
+Simulink, Simscape nor the bulk `.mat` runs, so they pass on a clean checkout
+and run in CI on every push.
+
+The trajectory tests check the property the generator exists for, that velocity
+and acceleration are exactly zero at both ends of a segment, along with the
+closed-form peak velocity `1.875*(qf-q0)/T` and peak acceleration
+`(10/sqrt(3))*(qf-q0)/T^2`, derivative consistency against central differences,
+clamping outside the segment, and the degenerate `q0 == qf` case. The feature
+tests pin the 42-column layout as 3 joints by 14 features, the windowing that
+determines dataset size, RMS scaling with amplitude, and kurtosis invariance
+to it.
+
+The suite was checked against five injected faults (a wrong quintic
+coefficient, a removed time clamp, a wrong velocity scaling, one diverging
+copy of the generator, and a changed trim length) and caught all five.
+
+### Two limitations the tests document rather than fix
+
+**A constant channel produces `NaN` kurtosis.** A joint whose residual is
+exactly constant, a dead sensor or a perfectly tracked joint, gives kurtosis
+`0/0`. The `NaN` propagates into the feature matrix and into classifier
+training with no warning. `TestExtractFeaturesWindowed` pins this as current
+behaviour so it cannot change unnoticed. It has not been fixed here because
+the right fix, guarding the statistic or dropping the window, changes the
+feature semantics and belongs with the classifier work.
+
+**`quintic_traj.m` exists in four identical copies**, at the repository root
+and beside each of the three Simulink models. Which one a script calls depends
+on MATLAB path order, and `addpath` prepends, so the last folder added wins.
+`TestQuinticTrajCopiesAgree` fails the build if the copies ever diverge, and
+pins which copy the suite resolves. The copies are left in place because each
+sits beside the model that loads it.
 
 ## Limitations
 
