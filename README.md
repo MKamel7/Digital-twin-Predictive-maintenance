@@ -207,61 +207,76 @@ model error and fault signal arrive through the same channel and cannot be told 
 ## Tests
 
 ```sh
-matlab -batch "run('scripts/run_public_ci_checks.m')"   % fast, no Simulink
-matlab -batch "run('scripts/run_model_checks.m')"       % needs Simulink + Simscape
+matlab -batch "run('scripts/run_public_ci_checks.m')"   % 48 points, no Simulink
+matlab -batch "run('scripts/run_model_checks.m')"       % 6 points, needs Simulink + Simscape
 ```
 
-Two suites, run as two CI jobs on every push.
+54 test points in two CI jobs on every push.
 
-**The fast suite, 45 test points, no Simulink and no run data.** It covers every
-piece of this repository that is pure computation:
+**The fast suite, 48 points**, covers everything in this repository that is pure
+computation, and needs no Simulink and no run data:
 
 | Under test | What is pinned |
 |---|---|
 | `quintic_traj` | zero velocity and acceleration at both ends, closed-form peak velocity `1.875*(qf-q0)/T` and peak acceleration `(10/sqrt(3))*(qf-q0)/T^2`, derivative consistency, clamping, the degenerate `q0 == qf` case |
 | the four copies of `quintic_traj` | that they stay byte-identical, and which one the path resolves |
 | `extract_features_windowed` | the 42-column layout as 3 joints by 14, the windowing that sets dataset size, RMS scaling, kurtosis invariance |
-| `assemble_feature_matrix` | that every window inherits its own run's label, run order, transposed input, mismatched label counts |
+| `assemble_feature_matrix` | that every window inherits its own run's label, run order, transposed input, and that a dead channel is rejected by name instead of poisoning the matrix |
 | `set_fault` | the fault-code mapping, the three parameter vectors, rejection of an unknown fault name |
 | `train_fault_classifier` | that accuracy is measured on held-out rows and not training rows, stratification, reproducibility under a seed |
+| every `.m` file | that the function it declares is the name it is stored under |
 
-**The model suite, 4 test points.** Loads `Robot_Phase1_PASS` and checks that
-both `Physical_Arm` and `Virtual_Twin` are present, that a signal named
-`delta_tau` exists, and that the solver is still `ode15s` at a 20 s stop time.
-It does not simulate: 20 s of ode15s over a Simscape Multibody arm is minutes
-of CPU per push for little added confidence. `delta_tau` is checked by name
-because `build_feature_matrix` reads `out.logsout.getElement('delta_tau')`,
-which makes the name an interface rather than a label.
+**The model suite, 6 points**, loads `Robot_Phase1_PASS` and checks that both
+`Physical_Arm` and `Virtual_Twin` are present, that a signal named `delta_tau`
+exists, that the model workspace actually loads `smiData` from a relative path,
+and that the solver is still `ode15s` at a 20 s stop time. It does not simulate:
+20 s of ode15s over a Simscape Multibody arm is minutes of CPU per push.
+`delta_tau` is checked by name because `build_feature_matrix` reads
+`out.logsout.getElement('delta_tau')`, which makes the name an interface.
 
-Both suites were mutation-tested. Nine faults were injected one at a time (a
-wrong quintic coefficient, a removed time clamp, a wrong velocity scaling, one
-diverging copy of the generator, a changed trim length, a dropped transpose
-correction, every window taking the first run's label, scoring the training
-split instead of the held-out split, and an altered fault code). All nine were
-caught. The training-split fault was **not** caught by the first version of the
-suite, which is why two further tests were added for it.
+Both suites are mutation-tested. Eleven faults were injected one at a time, and
+all eleven were caught. Two of them were caught only after the suite was
+improved: scoring the training split instead of the held-out split passed the
+first version of the classifier tests, because well-separated synthetic data
+scores near 100% either way.
 
-### Three defects these tests found, documented rather than fixed
+### Four defects these tests found
 
-**A constant channel produces `NaN` kurtosis.** A joint whose residual is
-exactly constant, a dead sensor or a perfectly tracked joint, gives kurtosis
-`0/0`. The `NaN` propagates into the feature matrix and into classifier
-training with no warning. Pinned by a clearly named test. Not fixed here
-because the right fix, guarding the statistic or dropping the window, changes
-feature semantics and belongs with the classifier work.
+**Fixed. The model could not load its parameters.** `Robot_Phase1_PASS`,
+`GDOFrobot` and `RobotFaultDetection_Phase1` all pointed their model workspace
+at `C:\Users\AMMAR\Documents\MATLAB\...`, an absolute path on a machine that is
+not this one. Every one of them loaded **zero** variables, so the arm had no
+link lengths, masses or inertias. The in-repo `GDOFrobot_DataFile.mat` is a
+128-byte empty MAT-file, so pointing at that would not have helped either: the
+parameters live in `GDOFrobot_DataFile.m`, which defines `smiData`. All four
+models now use that file by relative name and load it. Two tests guard it.
 
-**`quintic_traj.m` exists in four identical copies**, at the repository root
-and beside each of the three Simulink models. Which one a script calls depends
-on MATLAB path order, and `addpath` prepends, so the last folder added wins.
-`TestQuinticTrajCopiesAgree` fails the build if they diverge, and pins which
-copy the suite resolves. The copies are left in place because each sits beside
-the model that loads it.
+**Fixed. `build_feature_matrix.m` could not run at all.** It opened by changing
+directory to a `Desktop` path that exists on no machine. It now resolves its
+own location.
 
-**The model cannot reload its workspace.** `Robot_Phase1_PASS` carries a data
-source pointing at `C:\Users\AMMAR\Documents\MATLAB\...\models\Physical\GDOFrobot_DataFile.mat`,
-an absolute path on a machine that is not this one. The model loads with a
-warning and the tests pass, but the workspace is not restored from that file.
-It needs repointing at the copy in this repository.
+**Fixed. `extract_features.m` declared the wrong name.** It held the superseded
+30-feature extractor while declaring itself `extract_features_windowed`, the
+name of the live 42-feature one. MATLAB dispatches on the file name, so calling
+`extract_features` would have run the old code under the new name and produced
+a 30-column matrix where 42 were expected. The file now declares its own name
+and is marked superseded, and a repository-wide test stops the whole class of
+fault recurring.
+
+**Guarded, not fixed at source. A constant channel gives `NaN` kurtosis.** A
+joint whose residual never varies gives kurtosis `0/0`. That `NaN` used to flow
+into classifier training with no warning. `assemble_feature_matrix` now refuses
+non-finite features and names the offending run. The statistic itself is left
+alone: guarding or dropping the window changes feature semantics, and that
+belongs with the classifier work rather than with a test pass.
+
+### One hazard left in place deliberately
+
+`quintic_traj.m` exists in four identical copies, at the repository root and
+beside each of the three Simulink models. Which one a script calls depends on
+MATLAB path order, and `addpath` prepends, so the last folder added wins. The
+copies stay because each sits beside the model that loads it;
+`TestQuinticTrajCopiesAgree` fails the build if they ever diverge.
 
 ## Limitations
 

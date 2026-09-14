@@ -41,6 +41,18 @@ function [featureMatrix, labelVector] = assemble_feature_matrix(residuals, label
         feats = extract_features_windowed(residual, fs);
         n     = size(feats, 1);
 
+        if ~all(isfinite(feats(:)))
+            % A channel that never moves gives kurtosis 0/0 = NaN, which would
+            % otherwise reach the classifier and train on it silently. Fail
+            % here, where the offending run can still be named, rather than
+            % three steps downstream where the symptom is an odd accuracy.
+            bad = find(any(~isfinite(feats), 2), 1);
+            error('assemble_feature_matrix:NonFiniteFeatures', ...
+                  ['run %d produced non-finite features (first at window %d). ' ...
+                   'A residual channel with no variation gives an undefined ' ...
+                   'kurtosis. Check that run before including it.'], k, bad);
+        end
+
         featureMatrix = [featureMatrix; feats];         %#ok<AGROW>
         labelVector   = [labelVector;   labels(k) * ones(n, 1)]; %#ok<AGROW>
     end

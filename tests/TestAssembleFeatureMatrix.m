@@ -71,6 +71,32 @@ classdef TestAssembleFeatureMatrix < matlab.unittest.TestCase
                 "assemble_feature_matrix:LengthMismatch");
         end
 
+        function aDeadChannelIsRejectedRatherThanPoisoningTheMatrix(testCase)
+            % A channel with no variation gives kurtosis 0/0 = NaN. Before this
+            % guard the NaN reached classifier training with no warning at all.
+            % Now the run is named and the build stops.
+            dead = TestAssembleFeatureMatrix.syntheticRun(10, 10);
+            dead(:, 2) = 1.0;   % joint 2 never moves
+            testCase.verifyError( ...
+                @() assemble_feature_matrix({dead}, 0, testCase.FS), ...
+                "assemble_feature_matrix:NonFiniteFeatures");
+        end
+
+        function theOffendingRunIsIdentifiedInTheError(testCase)
+            % The message must name which run failed, or a 1800-run build tells
+            % you only that something somewhere is wrong.
+            good = TestAssembleFeatureMatrix.syntheticRun(10, 11);
+            dead = TestAssembleFeatureMatrix.syntheticRun(10, 12);
+            dead(:, 3) = 0.0;
+            try
+                assemble_feature_matrix({good, good, dead}, [0;1;2], testCase.FS);
+                testCase.verifyFail("expected a non-finite feature error");
+            catch err
+                testCase.verifyEqual(string(err.identifier), "assemble_feature_matrix:NonFiniteFeatures");
+                testCase.verifySubstring(err.message, "run 3");
+            end
+        end
+
         function aSingleRunMatchesTheExtractorDirectly(testCase)
             % The assembly must not alter the features themselves.
             r = TestAssembleFeatureMatrix.syntheticRun(10, 9);

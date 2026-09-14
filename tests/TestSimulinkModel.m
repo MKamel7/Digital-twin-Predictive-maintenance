@@ -75,6 +75,33 @@ classdef TestSimulinkModel < matlab.unittest.TestCase
                 "out.logsout.getElement('delta_tau'), so renaming it breaks the dataset build.");
         end
 
+        function theModelWorkspaceLoadsItsParameters(testCase)
+            % The model workspace is fed from GDOFrobot_DataFile.m, which
+            % defines smiData: every link length, mass, inertia and joint
+            % frame of the arm. An empty workspace means the model is not the
+            % machine it claims to be.
+            %
+            % This is here because it was broken. The data source pointed at
+            % an absolute path on another machine, the workspace loaded zero
+            % variables, and nothing failed. The structural tests all passed.
+            hws = get_param(char(testCase.ModelName), "ModelWorkspace");
+            testCase.verifyGreaterThan(numel(hws.whos), 0, ...
+                "the model workspace is empty, so the arm has no parameters");
+            testCase.verifyTrue(hws.hasVariable("smiData"), ...
+                "smiData missing: the Simscape Multibody parameters did not load");
+        end
+
+        function theWorkspaceSourceIsARelativePath(testCase)
+            % An absolute path makes the model work on exactly one machine.
+            % Keeping the filename relative lets it resolve beside the model
+            % in any checkout.
+            hws  = get_param(char(testCase.ModelName), "ModelWorkspace");
+            name = string(hws.FileName);
+            testCase.verifyFalse(contains(name, ":") || startsWith(name, "/") || startsWith(name, "\"), ...
+                "the model workspace data source is an absolute path (" + name + ...
+                "), so it will not resolve on another machine");
+        end
+
         function solverConfigurationIsUnchanged(testCase)
             % A stiff Simscape multibody model. Swapping to a fixed-step or
             % non-stiff solver changes the residual that everything is

@@ -1,4 +1,14 @@
-function features = extract_features_windowed(residual, fs)
+function features = extract_features(residual, fs)
+%EXTRACT_FEATURES  SUPERSEDED. The 30-feature extractor.
+%
+%   Kept for reference only. Nothing calls it. The live extractor is
+%   extract_features_windowed, which produces 42 features and trims two
+%   seconds from each end of the run.
+%
+%   Until now this file declared itself as extract_features_windowed
+%   while living in extract_features.m. MATLAB dispatches on the file
+%   name, so calling extract_features would have quietly run a
+%   30-feature extractor under the name of the 42-feature one.
 % residual: Nx3 matrix, fs: 1000 Hz
 % Returns MxF matrix — M windows, F features
 

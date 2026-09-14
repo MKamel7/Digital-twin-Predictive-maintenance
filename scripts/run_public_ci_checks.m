@@ -24,6 +24,7 @@ testFiles = [
     "tests/TestAssembleFeatureMatrix.m"
     "tests/TestSetFault.m"
     "tests/TestTrainFaultClassifier.m"
+    "tests/TestFunctionNamesMatchFiles.m"
 ];
 
 suites = cell(numel(testFiles), 1);
