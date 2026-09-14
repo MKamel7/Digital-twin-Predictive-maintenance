@@ -1,50 +1,36 @@
 % =========================================================================
 % SVM Classifier Training
+%
+% Training and scoring live in train_fault_classifier so that they can be
+% tested. This script loads the balanced feature set, calls it, then reports
+% and saves, which is the part a test has no business running.
 % =========================================================================
+
+cd(fileparts(mfilename('fullpath')));
+
 load('extracted_features_balanced.mat');
 
-% Normalize
-X = normalize(feature_matrix);
-Y = categorical(label_vector);
-
-% Train/test split 80/20
-cv    = cvpartition(Y, 'HoldOut', 0.2);
-X_train = X(cv.training, :);
-Y_train = Y(cv.training);
-X_test  = X(cv.test, :);
-Y_test  = Y(cv.test);
-
-% Train multiclass SVM
-t = templateSVM('KernelFunction', 'rbf', ...
-    'BoxConstraint', 1, ...
-    'KernelScale', 'auto', ...
-    'Standardize', true);
-
-model = fitcecoc(X_train, Y_train, 'Learners', t, ...
-    'Coding', 'onevsone');
-
-% Evaluate
-Y_pred = predict(model, X_test);
+result = train_fault_classifier(feature_matrix, label_vector);
 
 % Confusion matrix
+Y      = categorical(label_vector);
+Ytest  = Y(result.TestIndices);
+Ypred  = predict(result.Model, normalize(feature_matrix(result.TestIndices, :)));
+
 figure;
-cm = confusionchart(Y_test, Y_pred, ...
+confusionchart(Ytest, Ypred, ...
     'Title', 'SVM Fault Classification', ...
     'RowSummary', 'row-normalized', ...
     'ColumnSummary', 'column-normalized');
 
-% Accuracy
-acc = sum(Y_pred == Y_test) / numel(Y_test) * 100;
-fprintf('Test Accuracy: %.2f%%\n', acc);
+fprintf('Test Accuracy: %.2f%%\n', result.Accuracy);
 
-% Per-class accuracy
-classes = {'healthy','gear_wear','bearing','joint_imbalance'};
-for c = 0:3
-    idx  = Y_test == categorical(c);
-    pacc = sum(Y_pred(idx) == Y_test(idx)) / sum(idx) * 100;
-    fprintf('%s accuracy: %.2f%%\n', classes{c+1}, pacc);
+class_names = {'healthy', 'gear_wear', 'bearing', 'joint_imbalance'};
+for c = 1:numel(result.Classes)
+    name = class_names{str2double(result.Classes{c}) + 1};
+    fprintf('%s accuracy: %.2f%%\n', name, result.PerClassAccuracy(c));
 end
 
-% Save model
+model = result.Model;
 save('svm_fault_classifier.mat', 'model');
 fprintf('Model saved.\n');

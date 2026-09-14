@@ -28,3 +28,29 @@ jobs:
         uses: matlab-actions/run-command@v2
         with:
           command: run("scripts/run_public_ci_checks.m")
+
+  model:
+    name: Simulink model structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # the model loads without its LFS .mat data; only structure is checked
+
+      # Simulink, Simscape and Simscape Multibody take several minutes to
+      # install, which is why this is a separate job from the fast suite.
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: R2026a
+          products: |
+            Simulink
+            Simscape
+            Simscape_Multibody
+
+      # Loads Robot_Phase1_PASS and checks its structure. It is not simulated:
+      # 20 s of ode15s over a multibody arm is minutes of CPU per push.
+      - name: Run model structure checks
+        uses: matlab-actions/run-command@v2
+        with:
+          command: run("scripts/run_model_checks.m")

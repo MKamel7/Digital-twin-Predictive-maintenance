@@ -207,43 +207,61 @@ model error and fault signal arrive through the same channel and cannot be told 
 ## Tests
 
 ```sh
-matlab -batch "run('scripts/run_public_ci_checks.m')"
+matlab -batch "run('scripts/run_public_ci_checks.m')"   % fast, no Simulink
+matlab -batch "run('scripts/run_model_checks.m')"       % needs Simulink + Simscape
 ```
 
-25 test points over the two pieces of pure computation in this repository: the
-quintic trajectory generator and the 42-feature extractor. They need neither
-Simulink, Simscape nor the bulk `.mat` runs, so they pass on a clean checkout
-and run in CI on every push.
+Two suites, run as two CI jobs on every push.
 
-The trajectory tests check the property the generator exists for, that velocity
-and acceleration are exactly zero at both ends of a segment, along with the
-closed-form peak velocity `1.875*(qf-q0)/T` and peak acceleration
-`(10/sqrt(3))*(qf-q0)/T^2`, derivative consistency against central differences,
-clamping outside the segment, and the degenerate `q0 == qf` case. The feature
-tests pin the 42-column layout as 3 joints by 14 features, the windowing that
-determines dataset size, RMS scaling with amplitude, and kurtosis invariance
-to it.
+**The fast suite, 45 test points, no Simulink and no run data.** It covers every
+piece of this repository that is pure computation:
 
-The suite was checked against five injected faults (a wrong quintic
-coefficient, a removed time clamp, a wrong velocity scaling, one diverging
-copy of the generator, and a changed trim length) and caught all five.
+| Under test | What is pinned |
+|---|---|
+| `quintic_traj` | zero velocity and acceleration at both ends, closed-form peak velocity `1.875*(qf-q0)/T` and peak acceleration `(10/sqrt(3))*(qf-q0)/T^2`, derivative consistency, clamping, the degenerate `q0 == qf` case |
+| the four copies of `quintic_traj` | that they stay byte-identical, and which one the path resolves |
+| `extract_features_windowed` | the 42-column layout as 3 joints by 14, the windowing that sets dataset size, RMS scaling, kurtosis invariance |
+| `assemble_feature_matrix` | that every window inherits its own run's label, run order, transposed input, mismatched label counts |
+| `set_fault` | the fault-code mapping, the three parameter vectors, rejection of an unknown fault name |
+| `train_fault_classifier` | that accuracy is measured on held-out rows and not training rows, stratification, reproducibility under a seed |
 
-### Two limitations the tests document rather than fix
+**The model suite, 4 test points.** Loads `Robot_Phase1_PASS` and checks that
+both `Physical_Arm` and `Virtual_Twin` are present, that a signal named
+`delta_tau` exists, and that the solver is still `ode15s` at a 20 s stop time.
+It does not simulate: 20 s of ode15s over a Simscape Multibody arm is minutes
+of CPU per push for little added confidence. `delta_tau` is checked by name
+because `build_feature_matrix` reads `out.logsout.getElement('delta_tau')`,
+which makes the name an interface rather than a label.
+
+Both suites were mutation-tested. Nine faults were injected one at a time (a
+wrong quintic coefficient, a removed time clamp, a wrong velocity scaling, one
+diverging copy of the generator, a changed trim length, a dropped transpose
+correction, every window taking the first run's label, scoring the training
+split instead of the held-out split, and an altered fault code). All nine were
+caught. The training-split fault was **not** caught by the first version of the
+suite, which is why two further tests were added for it.
+
+### Three defects these tests found, documented rather than fixed
 
 **A constant channel produces `NaN` kurtosis.** A joint whose residual is
 exactly constant, a dead sensor or a perfectly tracked joint, gives kurtosis
 `0/0`. The `NaN` propagates into the feature matrix and into classifier
-training with no warning. `TestExtractFeaturesWindowed` pins this as current
-behaviour so it cannot change unnoticed. It has not been fixed here because
-the right fix, guarding the statistic or dropping the window, changes the
+training with no warning. Pinned by a clearly named test. Not fixed here
+because the right fix, guarding the statistic or dropping the window, changes
 feature semantics and belongs with the classifier work.
 
 **`quintic_traj.m` exists in four identical copies**, at the repository root
 and beside each of the three Simulink models. Which one a script calls depends
 on MATLAB path order, and `addpath` prepends, so the last folder added wins.
-`TestQuinticTrajCopiesAgree` fails the build if the copies ever diverge, and
-pins which copy the suite resolves. The copies are left in place because each
-sits beside the model that loads it.
+`TestQuinticTrajCopiesAgree` fails the build if they diverge, and pins which
+copy the suite resolves. The copies are left in place because each sits beside
+the model that loads it.
+
+**The model cannot reload its workspace.** `Robot_Phase1_PASS` carries a data
+source pointing at `C:\Users\AMMAR\Documents\MATLAB\...\models\Physical\GDOFrobot_DataFile.mat`,
+an absolute path on a machine that is not this one. The model loads with a
+warning and the tests pass, but the workspace is not restored from that file.
+It needs repointing at the copy in this repository.
 
 ## Limitations
 

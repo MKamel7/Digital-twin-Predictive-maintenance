@@ -21,6 +21,9 @@ testFiles = [
     "tests/TestQuinticTraj.m"
     "tests/TestQuinticTrajCopiesAgree.m"
     "tests/TestExtractFeaturesWindowed.m"
+    "tests/TestAssembleFeatureMatrix.m"
+    "tests/TestSetFault.m"
+    "tests/TestTrainFaultClassifier.m"
 ];
 
 suites = cell(numel(testFiles), 1);
