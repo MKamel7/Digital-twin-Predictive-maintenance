@@ -1,6 +1,9 @@
 # Digital Twin Predictive Maintenance
 
 [![CI](https://github.com/MKamel7/Digital-twin-Predictive-maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/MKamel7/Digital-twin-Predictive-maintenance/actions/workflows/ci.yml)
+[![Status](https://img.shields.io/badge/status-historical%20prototype-lightgrey)](#-where-this-sits)
+[![MATLAB](https://img.shields.io/badge/MATLAB-Simscape%20Multibody-orange)](https://www.mathworks.com)
+[![Tests](https://img.shields.io/badge/tests-25%20points-brightgreen)](tests)
 
 A Simscape Multibody digital twin of a 3-DOF robot arm, used as a fault factory: it generates
 labelled healthy and faulty runs that would be expensive and unsafe to seed on real hardware, and a
@@ -17,7 +20,28 @@ delta_tau = tau_actual - tau_expected
 is torque the healthy model cannot account for. Everything downstream is feature extraction and
 classification on that residual.
 
-## What is in this repository, and what is not
+## 🕓 Where this sits
+
+**This is a historical prototype, kept public deliberately.** It is my first attempt at
+residual-based diagnosis, and it is superseded by
+[bearing-rul-digital-twin-matlab](https://github.com/MKamel7/bearing-rul-digital-twin-matlab),
+which does the same kind of work on measured data with the evaluation protocol fixed.
+
+Two numbers matter here, and they are not the same kind of number:
+
+| | |
+| --- | --- |
+| **59.6%** | four-class accuracy of the flat 42-feature SVM **that is in this repository**. ⚠ Its hold-out **splits by window rather than by run**, and windows overlap by 50%, so neighbouring windows are not independent and the split leaks. Take the number as an upper bound on a method that did not work. |
+| **94.4 ± 1.6%** | full-diagnosis accuracy **reported by the later study**, whose classifier stage is **not in this repository** and which cannot be reproduced from a checkout. Its own published protocol is grouped leave-one-trajectory-out CV at **96.7 ± 4.9%**. |
+
+The leak belongs to the first row only. It does not touch the second, because the second
+was evaluated with grouped cross-validation and is not runnable here anyway.
+
+**I have put the weaker, reproducible number first on purpose.** A reader can clone this
+and check the 59.6%. They cannot check the 94.4%. Presenting them the other way round
+would lead with the figure nobody can verify.
+
+## 📦 What is in this repository, and what is not
 
 This repository is the **simulation half plus the first classifier prototype**. It contains the
 Simscape model, the trajectory generators, the PD gain fitting, the forward-kinematics cross-check,
@@ -33,7 +57,17 @@ Reading this repository, the honest summary is: the flat SVM stage is the one th
 well enough, and it is kept because the reason it did not is the interesting part. See
 [Why the flat prototype scored 59.6%](#why-the-flat-prototype-scored-596) below.
 
-## The machine
+## 🛠️ Built with
+
+| | |
+| --- | --- |
+| **Physics** | MATLAB, Simscape Multibody, forward and inverse dynamics |
+| **Machine** | 3-DOF serial robot arm, PD-controlled, 1 kHz |
+| **Signal** | Residual torque, `delta_tau = tau_actual - tau_expected` |
+| **Learning** | 42 hand-built features, multiclass ECOC over one-vs-one RBF SVMs |
+| **Engineering** | 25 CI test points on GitHub Actions, Statistics and Machine Learning Toolbox |
+
+## 🦾 The machine
 
 A 3-DOF revolute arm imported from a SolidWorks assembly through Simscape Multibody
 (`GDOFrobot_DataFile.m` carries the exported geometry, so the inertias are CAD-derived rather than
@@ -54,7 +88,7 @@ built on a model that does not agree with itself is not a diagnosis.
 Payload is a simulation variable (`sim_payload_mass`), swept at 0.5, 1.5 and 2.5 kg so that load is
 a nuisance variable the classifier has to survive rather than a hidden label.
 
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TB
@@ -79,7 +113,7 @@ flowchart TB
   clf --> out["4-class label:<br/>healthy / gear wear / bearing / joint imbalance"]
 ```
 
-## Fault injection
+## 💥 Fault injection
 
 Three fault families, each injectable at any one of the three joints, set from the base workspace by
 `set_fault(fault_type, joint_id, degradation_index)`:
@@ -96,7 +130,7 @@ regression variable in the data even where it is later bucketed into three level
 vectors carry the per-family shape (characteristic frequencies for the bearing case, tooth-meshing
 terms for gear wear, an unbalance amplitude for imbalance); the model subsystem consumes them.
 
-## Data generation
+## 🔄 Data generation
 
 `generate_dataset_v2.m` runs the sweep:
 
@@ -116,7 +150,7 @@ Runs are quality-gated rather than trusted. A run is only usable if the residual
 error stay inside limits set per joint, `[2.0 3.0 2.0]` Nm and `[3.0 8.0 8.0]` degrees, with the
 first 0.5 s of startup excluded from the metrics.
 
-## Features
+## 📐 Features
 
 `extract_features_windowed.m` drops the first and last two seconds of each run as transient, then
 cuts 1 s windows at 50% overlap. Fourteen features per joint, three joints, 42 in total:
@@ -135,7 +169,7 @@ periodic gear and imbalance signatures live.
 explained by the first two principal components, and writes the balanced matrix that training
 consumes.
 
-## Classifier and evaluation, as implemented here
+## 🧪 Classifier and evaluation, as implemented here
 
 `SVM_classifier_training.m`: z-score normalisation, a stratified 80/20 hold-out split, then a
 multiclass error-correcting-output-code model (`fitcecoc`) over one-vs-one RBF SVMs with
@@ -166,7 +200,7 @@ diagnosis of that number is the useful part of this repository. Three things wer
 The published pipeline fixed all three: the noise artifact was removed, the feature set widened,
 and the flat model replaced by a four-stage hierarchy.
 
-## Reported results of the full study
+## 📊 Reported results of the full study
 
 **These are not reproducible from this checkout.** They come from the case study report, whose
 classifier stage is not in this repository, and they are quoted here so this repo is not read as
@@ -204,7 +238,7 @@ At ±10% mismatch the pipeline is doing little better than guessing between four
 the expected failure mode of a residual-based method: the residual is defined by the model, so
 model error and fault signal arrive through the same channel and cannot be told apart.
 
-## Tests
+## ✅ Tests
 
 ```sh
 matlab -batch "run('scripts/run_public_ci_checks.m')"   % 48 points, no Simulink
@@ -278,7 +312,44 @@ MATLAB path order, and `addpath` prepends, so the last folder added wins. The
 copies stay because each sits beside the model that loads it;
 `TestQuinticTrajCopiesAgree` fails the build if they ever diverge.
 
-## Limitations
+## 💡 What I learned
+
+- **A leak hides in how you split, not in the model.** Splitting by window looked
+  perfectly reasonable until I noticed windows overlap by 50% and many come from the same
+  simulation, so the test set was full of near-copies of the training set. Grouped
+  leave-one-trajectory-out is what fixes it, and it is the single most transferable thing
+  this project taught me. I met the same failure again on the bearing project and
+  recognised it immediately.
+
+- **My own noise injection was the biggest fault in the data.** `generate_dataset_v2.m`
+  added unit-variance white noise as an encoder artifact. Real encoders are nothing like
+  that, and it sat directly on top of the spectral features the fault families were
+  supposed to be separated by. I spent a long time blaming the classifier for a problem I
+  had put in the dataset.
+
+- **One model answering four questions answers none of them well.** Asking a single flat
+  decision to say faulty or not, which fault, which joint and how severe forces one
+  boundary to carry four unrelated questions. Splitting it into a hierarchy is most of the
+  gap between 59.6% and the later result.
+
+- **The accuracy was never the important number.** The important one is how fast accuracy
+  dies when the twin stops matching the plant: 100% at no mismatch, 87% at ±5%, 59% at
+  ±10%. A residual method defines its signal by the model, so model error and fault signal
+  arrive through the same channel and cannot be separated. That is the honest ceiling on
+  the whole approach.
+
+## 🔭 Future improvements
+
+This repository is frozen as a record. If it were revived rather than superseded:
+
+- **Re-run the prototype with grouped leave-one-trajectory-out** and publish the corrected
+  number beside the 59.6%, so the size of the leak is measured rather than described.
+- **Replace the synthetic encoder noise** with a measured noise profile, and re-extract the
+  spectral features underneath it.
+- **Bring the four-stage hierarchy into the repository**, so the reported 94.4% stops being
+  a quoted figure and becomes a runnable one.
+
+## ⚠️ Limitations
 
 * **Never validated on real hardware.** Every number above is simulation to simulation. The
   mismatch sweep is the closest thing to a sim-to-real estimate, and it is not encouraging.
@@ -290,7 +361,7 @@ copies stay because each sits beside the model that loads it;
   severity accuracy relative to a regression framing.
 * **Window-level splitting in the prototype script leaks**, as noted above.
 
-## Reproducing it
+## ▶️ Reproducing it
 
 Requires **MATLAB R2025b or newer** with **Simulink**, **Simscape**, **Simscape Multibody**, the
 **Statistics and Machine Learning Toolbox** and the **Signal Processing Toolbox**. No Python.
@@ -328,7 +399,7 @@ out = sim('Robot_Phase1_PASS', 'SrcWorkspace', 'current');
 **Known rough edge:** `build_feature_matrix.m` opens with a hardcoded absolute `cd` to the machine
 it was written on. Delete that line, or start MATLAB in `models/FullSystem`.
 
-## Repository layout
+## 📁 Repository layout
 
 ```
 GDOFrobot_DataFile.m           CAD-exported geometry and inertias
@@ -358,8 +429,14 @@ names say which stage: `PhysicalArm_Phase0_BACKUP`, `..._step5_working`,
 `..._step6_tauExpected_working`, `..._step7_residual_working`,
 `..._step10_baseline_PASS`. It is the closest thing this single-commit repository has to a history.
 
-## Authorship
+## 📄 Authorship
 
 A three-person M.Eng. case study (Mechatronic System Simulation, THD Cham, summer 2026), submitted
 25 June 2026. I did the technical work end to end: the Simscape twin, the residual pipeline, the
 feature extraction, the classifiers and the dashboard. The formal submission carries three names.
+
+---
+
+Built by **Mo Kamel**, M.Eng. Mechatronic and Cyber-Physical Systems, Technische
+Hochschule Deggendorf.
+[Portfolio](https://mkamel7.github.io) · [LinkedIn](https://linkedin.com/in/mo-kamel7)
